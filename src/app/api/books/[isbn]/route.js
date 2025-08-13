@@ -25,12 +25,8 @@ function slugify(text) {
         'ü': 'u', 'Ü': 'U'
     };
 
-    // Replace Turkish characters
-    let str = text.replace(/[çÇğĞıİöÖşŞüÜ]/g, function(match) {
-        return turkishMap[match];
-    });
+    let str = text.replace(/[çÇğĞıİöÖşŞüÜ]/g, (match) => turkishMap[match]);
 
-    // The rest of the slugifying process
     return str.toString().toLowerCase()
         .replace(/\s+/g, '-')           // Replace spaces with -
         .replace(/[^\w\-]+/g, '')       // Remove all non-word chars
@@ -39,21 +35,16 @@ function slugify(text) {
         .replace(/-+$/, '');            // Trim - from end of text
 }
 
-
 // Google Books API Fetcher
 async function fetchBookFromGoogle(isbn) {
-    // Note: It's better to store the API Key in .env.local
     const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
     const url = `https://www.googleapis.com/books/v1/volumes?q=isbn:${isbn}&key=${apiKey}`;
     
     const response = await fetch(url);
-    if (!response.ok) {
-        return null;
-    }
+    if (!response.ok) return null;
+    
     const data = await response.json();
-    if (!data.items || data.items.length === 0) {
-        return null;
-    }
+    if (!data.items || data.items.length === 0) return null;
 
     const bookData = data.items[0].volumeInfo;
     const title = bookData.title;
@@ -61,16 +52,16 @@ async function fetchBookFromGoogle(isbn) {
     return {
         isbn: isbn,
         title: title,
-        slug: slugify(title), // Generate and add the slug
+        slug: slugify(title),
         authors: bookData.authors || [],
         publisher: bookData.publisher || 'N/A',
         publishedDate: bookData.publishedDate || 'N/A',
         description: bookData.description || 'Açıklama yok.',
         pageCount: bookData.pageCount || 0,
         thumbnail: bookData.imageLinks?.thumbnail || null,
+        price: null, // Add price field with initial value null
     };
 }
-
 
 // GET /api/books/{isbn} - Read book info from DB
 export async function GET(request, context)  {
@@ -83,7 +74,6 @@ export async function GET(request, context)  {
             return NextResponse.json({ error: "Kitap veritabanında bulunamadı." }, { status: 404 });
         }
 
-        // Remove the internal _id before sending it to the client
         const { _id, ...bookData } = book;
         return NextResponse.json(bookData);
 
@@ -93,19 +83,17 @@ export async function GET(request, context)  {
     }
 }
 
-
 // POST /api/books/{isbn} - Increment/Decrement quantity
 export async function POST(request, context)  {
     try {
         const { isbn } = context.params;
-        const { action } = await request.json(); // 'increment' or 'decrement'
+        const { action } = await request.json();
         const booksCollection = await getBooksCollection();
 
         if (action === 'increment') {
             const existingBook = await booksCollection.findOne({ isbn: isbn });
 
             if (existingBook) {
-                // Book exists, increment quantity
                 const result = await booksCollection.findOneAndUpdate(
                     { isbn: isbn },
                     { $inc: { quantity: 1 } },
@@ -114,14 +102,12 @@ export async function POST(request, context)  {
                 const { _id, ...bookData } = result;
                 return NextResponse.json({ book: bookData, isNew: false });
             } else {
-                // Book does not exist, fetch from Google and create
                 const newBookData = await fetchBookFromGoogle(isbn);
                 if (!newBookData) {
                     return NextResponse.json({ error: "Bu ISBN ile Google Books API'de kitap bulunamadı." }, { status: 404 });
                 }
                 
-                // The slug is already included from fetchBookFromGoogle
-                const bookToInsert = { ...newBookData, quantity: 1 };
+                const bookToInsert = { ...newBookData, quantity: 1 }; // price is already in newBookData
                 await booksCollection.insertOne(bookToInsert);
                 
                 return NextResponse.json({ book: bookToInsert, isNew: true }, { status: 201 });
@@ -134,7 +120,6 @@ export async function POST(request, context)  {
             }
 
             if (existingBook.quantity > 1) {
-                // Decrement quantity
                 const result = await booksCollection.findOneAndUpdate(
                     { isbn: isbn },
                     { $inc: { quantity: -1 } },
@@ -143,9 +128,8 @@ export async function POST(request, context)  {
                 const { _id, ...bookData } = result;
                 return NextResponse.json(bookData);
             } else {
-                // Quantity is 1, so delete the book
                 await booksCollection.deleteOne({ isbn: isbn });
-                return new Response(null, { status: 204 }); // 204 No Content
+                return new Response(null, { status: 204 });
             }
         } else {
             return NextResponse.json({ error: "Geçersiz işlem." }, { status: 400 });
