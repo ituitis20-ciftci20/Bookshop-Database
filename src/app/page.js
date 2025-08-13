@@ -33,22 +33,32 @@ export default function HomePage() {
     const [book, setBook] = useState(null);
     const [message, setMessage] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-    const [reviewText, setReviewText] = useState('');
+    
+    // New state for search functionality
+    const [searchTerm, setSearchTerm] = useState('');
+    const [searchResults, setSearchResults] = useState([]);
 
     const handleResponse = (data, successMessage) => {
         if (data.error) {
             setMessage(`Hata: ${data.error}`);
             setBook(null);
+            setSearchResults([]);
         } else {
             setMessage(successMessage);
-            setBook(data);
+            if (Array.isArray(data)) {
+                setSearchResults(data);
+                setBook(null);
+            } else {
+                setBook(data);
+                setSearchResults([]);
+            }
         }
     };
 
     const clearState = () => {
         setBook(null);
         setMessage('');
-        setReviewText('');
+        setSearchResults([]); // Clear search results as well
     }
 
     const handleGetBook = async () => {
@@ -131,40 +141,68 @@ export default function HomePage() {
         }
     };
 
-    const handleAddReview = async (e) => {
-        e.preventDefault();
-        if (!reviewText.trim()) {
-            setMessage('Yorum alanı boş bırakılamaz.');
+    // Slugify function for the client-side with proper Turkish character mapping
+    const slugify = (text) => {
+        if (!text) return '';
+
+        const turkishMap = {
+            'ç': 'c', 'Ç': 'C',
+            'ğ': 'g', 'Ğ': 'G',
+            'ı': 'i', 'İ': 'I',
+            'ö': 'o', 'Ö': 'O',
+            'ş': 's', 'Ş': 'S',
+            'ü': 'u', 'Ü': 'U'
+        };
+
+        // Replace Turkish characters
+        let str = text.replace(/[çÇğĞıİöÖşŞüÜ]/g, function(match) {
+            return turkishMap[match];
+        });
+
+        // The rest of the slugifying process
+        return str.toString().toLowerCase()
+            .replace(/\s+/g, '-')           // Replace spaces with -
+            .replace(/[^\w\-]+/g, '')       // Remove all non-word chars
+            .replace(/\-\-+/g, '-')         // Replace multiple - with single -
+            .replace(/^-+/, '')             // Trim - from start of text
+            .replace(/-+$/, '');            // Trim - from end of text
+    }
+
+    // Handler for the new search-by-name functionality
+    const handleSearchByName = async (e) => {
+        e.preventDefault(); // Prevent form submission
+        if (!searchTerm) {
+            setMessage('Lütfen aramak için bir kitap adı girin.');
             return;
         }
         setIsLoading(true);
+        clearState();
+        
+        const slug = slugify(searchTerm);
+
         try {
-            const res = await fetch(`/api/books/${book.isbn}`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'add_review', reviewText: reviewText })
-            });
+            const res = await fetch(`/api/books/search/${slug}`);
             const data = await res.json();
+            
             if (!res.ok) {
-                setMessage(`Hata: ${data.error}`);
+                handleResponse({ error: data.error }, '');
             } else {
-                setBook(data.book); // Update book state with new review
-                setMessage('Yorum başarıyla eklendi.');
-                setReviewText(''); // Clear input field
+                handleResponse(data, `${data.length} adet kitap bulundu.`);
             }
         } catch (error) {
-            setMessage('Yorum eklenirken bir hata oluştu.');
+            setMessage('Arama sırasında bir sunucu hatası oluştu.');
         } finally {
             setIsLoading(false);
         }
     };
 
     return (
-        <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4">
+        <div className="min-h-screen bg-gray-100 flex items-center justify-center p-4 font-sans">
             <div className="w-full max-w-2xl mx-auto bg-white rounded-xl shadow-lg p-8">
                 <h1 className="text-3xl font-bold text-center text-gray-800 mb-2">Kitap Depo Yönetimi</h1>
-                <p className="text-center text-gray-500 mb-8">Kitapları yönetmek için barkod (ISBN) okutun.</p>
+                <p className="text-center text-gray-500 mb-8">Kitapları yönetmek için barkod (ISBN) okutun veya adıyla arayın.</p>
 
+                {/* Barcode Section */}
                 <div className="flex flex-col sm:flex-row gap-2">
                     <input
                         type="text"
@@ -174,28 +212,58 @@ export default function HomePage() {
                         className="flex-grow p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-indigo-500 transition"
                     />
                 </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-4">
                     <button onClick={handleGetBook} disabled={isLoading} className="p-3 bg-blue-600 text-white rounded-md font-semibold hover:bg-blue-700 disabled:bg-blue-300 transition">
-                        {isLoading ? 'Aranıyor...' : 'Bilgi Getir'}
+                        Bilgi Getir
                     </button>
                     <button onClick={handleAddBook} disabled={isLoading} className="p-3 bg-green-600 text-white rounded-md font-semibold hover:bg-green-700 disabled:bg-green-300 transition">
-                        {isLoading ? 'İşleniyor...' : 'Ekle / Artır'}
+                        Ekle / Artır
                     </button>
                     <button onClick={handleRemoveBook} disabled={isLoading} className="p-3 bg-red-600 text-white rounded-md font-semibold hover:bg-red-700 disabled:bg-red-300 transition">
-                        {isLoading ? 'İşleniyor...' : 'Azalt / Sil'}
+                        Azalt / Sil
                     </button>
                 </div>
 
+                {/* Search by Name Section */}
+                <form onSubmit={handleSearchByName} className="mt-8 pt-6 border-t">
+                    <h2 className="text-xl font-bold text-center text-gray-700 mb-4">Veya Kitap Adıyla Ara</h2>
+                    <div className="flex flex-col sm:flex-row gap-2">
+                        <input
+                            type="text"
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            placeholder="Kitap adını girin..."
+                            className="flex-grow p-3 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-purple-500 transition"
+                        />
+                    </div>
+                    <div className="mt-4">
+                        <button type="submit" disabled={isLoading} className="w-full p-3 bg-purple-600 text-white rounded-md font-semibold hover:bg-purple-700 disabled:bg-purple-300 transition">
+                            {isLoading ? 'Aranıyor...' : 'Kitap Adıyla Ara'}
+                        </button>
+                    </div>
+                </form>
+
+                {/* Message and Results Area */}
                 {message && (
                     <div className={`mt-6 p-3 rounded-md text-center text-sm ${message.startsWith('Hata:') ? 'bg-red-100 text-red-800' : 'bg-green-100 text-green-800'}`}>
                         {message}
                     </div>
                 )}
 
-                {isLoading && !book && <div className="text-center mt-4">Yükleniyor...</div>}
+                {isLoading && !book && searchResults.length === 0 && <div className="text-center mt-4">Yükleniyor...</div>}
                 
-                <BookInfoCard book={book} />
+                {/* Display single book from barcode operations */}
+                {book && <BookInfoCard book={book} />}
+
+                {/* Display multiple books from search results */}
+                {searchResults.length > 0 && (
+                    <div className="mt-6">
+                        <h3 className="text-xl font-bold mb-2">Arama Sonuçları:</h3>
+                        {searchResults.map((b, index) => (
+                            <BookInfoCard key={index} book={b} />
+                        ))}
+                    </div>
+                )}
             </div>
         </div>
     );

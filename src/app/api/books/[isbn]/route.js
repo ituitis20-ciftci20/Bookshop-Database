@@ -8,6 +8,38 @@ async function getBooksCollection() {
     return db.collection("books");
 }
 
+/**
+ * Converts a string into a URL-friendly slug with proper Turkish character mapping.
+ * @param {string} text - The text to slugify.
+ * @returns {string} The slugified text.
+ */
+function slugify(text) {
+    if (!text) return '';
+
+    const turkishMap = {
+        'ç': 'c', 'Ç': 'C',
+        'ğ': 'g', 'Ğ': 'G',
+        'ı': 'i', 'İ': 'I',
+        'ö': 'o', 'Ö': 'O',
+        'ş': 's', 'Ş': 'S',
+        'ü': 'u', 'Ü': 'U'
+    };
+
+    // Replace Turkish characters
+    let str = text.replace(/[çÇğĞıİöÖşŞüÜ]/g, function(match) {
+        return turkishMap[match];
+    });
+
+    // The rest of the slugifying process
+    return str.toString().toLowerCase()
+        .replace(/\s+/g, '-')           // Replace spaces with -
+        .replace(/[^\w\-]+/g, '')       // Remove all non-word chars
+        .replace(/\-\-+/g, '-')         // Replace multiple - with single -
+        .replace(/^-+/, '')             // Trim - from start of text
+        .replace(/-+$/, '');            // Trim - from end of text
+}
+
+
 // Google Books API Fetcher
 async function fetchBookFromGoogle(isbn) {
     // Note: It's better to store the API Key in .env.local
@@ -24,9 +56,12 @@ async function fetchBookFromGoogle(isbn) {
     }
 
     const bookData = data.items[0].volumeInfo;
+    const title = bookData.title;
+
     return {
         isbn: isbn,
-        title: bookData.title,
+        title: title,
+        slug: slugify(title), // Generate and add the slug
         authors: bookData.authors || [],
         publisher: bookData.publisher || 'N/A',
         publishedDate: bookData.publishedDate || 'N/A',
@@ -59,11 +94,11 @@ export async function GET(request, context)  {
 }
 
 
-// POST /api/books/{isbn} - Increment/Decrement quantity or Add a review
+// POST /api/books/{isbn} - Increment/Decrement quantity
 export async function POST(request, context)  {
     try {
         const { isbn } = context.params;
-        const { action, reviewText } = await request.json(); // 'increment', 'decrement', or 'add_review'
+        const { action } = await request.json(); // 'increment' or 'decrement'
         const booksCollection = await getBooksCollection();
 
         if (action === 'increment') {
@@ -85,7 +120,8 @@ export async function POST(request, context)  {
                     return NextResponse.json({ error: "Bu ISBN ile Google Books API'de kitap bulunamadı." }, { status: 404 });
                 }
                 
-                const bookToInsert = { ...newBookData, quantity: 1, reviews: [] }; // Add empty reviews array
+                // The slug is already included from fetchBookFromGoogle
+                const bookToInsert = { ...newBookData, quantity: 1 };
                 await booksCollection.insertOne(bookToInsert);
                 
                 return NextResponse.json({ book: bookToInsert, isNew: true }, { status: 201 });
